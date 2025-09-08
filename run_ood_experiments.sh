@@ -23,7 +23,7 @@ mamba activate /projects/p32626/transformer_em/pytorch-cuda-12-1
 
 cd /projects/p32626/transformer_pca
 
-export WANDB_API_KEY=22f5b98b271e23783fe205c51c48c38fae675718
+export WANDB_API_KEY=
 
 # First, generate the OOD datasets
 echo "Generating OOD datasets..."
