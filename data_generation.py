@@ -203,7 +203,8 @@ class CovarianceDataset(Dataset):
             return X, Y
 
 class CovarianceDataset_real_world(Dataset):
-    def __init__(self, file_name, k, predict_vector=True, is_test=False):
+    def __init__(self, file_name, k, predict_vector=True, is_test=False, ratio_use=1.0):
+        
         # Load the data from the .npz file
         data = np.load(file_name)
         
@@ -221,6 +222,15 @@ class CovarianceDataset_real_world(Dataset):
                 self.Y_vector_data = data['Y_vector_train'][:,:,:k]  # Load training vector data
             else:
                 self.Y_vector_data = None
+
+            if 0 < ratio_use < 1.0:
+                n_total = len(self.X_data)
+                n_use = int(n_total * ratio_use)
+                idx = np.random.choice(n_total, n_use, replace=False)
+                self.X_data = self.X_data[idx]
+                self.Y_data = self.Y_data[idx]
+                if self.Y_vector_data is not None:
+                    self.Y_vector_data = self.Y_vector_data[idx]
 
         self.predict_vector = predict_vector
 
