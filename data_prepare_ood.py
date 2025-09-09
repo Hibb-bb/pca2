@@ -184,9 +184,12 @@ def generate_mnist_ood(
 
 if __name__ == "__main__":
     # Example: Train on digits 0-4, test on digits 5-9
+
+    # for n in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+    
     generate_mnist_ood(
-        num_train_samples=1000000,   # Reduce for testing
-        num_test_samples=2048,
+        num_train_samples=6400000,   # Reduce for testing
+        num_test_samples=10000,
         D=10,
         N=10,
         k=5,
