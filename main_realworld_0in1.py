@@ -50,7 +50,7 @@ def parse_args():
     parser.add_argument("--penalty",action='store_true', help="Number of epochs for training")
     parser.add_argument("--eigenspace",action='store_true', help="Number of epochs for training")
     parser.add_argument("--eval_step",type=int, default=5000,help="Number of epochs for training")
-
+    parser.add_argument("--ratio_use",type=float, default=1.0,help="ratio of training data used")
 
   
     return parser.parse_args()
@@ -77,21 +77,22 @@ if __name__ == "__main__":
     torch.set_num_threads(6)
     args = parse_args()
   
-    # wandb.init(project="transformer_pca", config={
-    #     "learning_rate": args.lr,
-    #     "batch_size": args.batch_size,
-    #     "architecture": "gpt2",
-    #     "dataset": "Generated Covariance Data",
-    #     "training_steps": args.training_steps,
-    #     "D": args.D,
-    #     "N": args.N,
-    #     "top_k_eigenvalues": args.k,
-    #     "n_embd": args.n_embd,
-    #     "n_layer": args.n_layer,
-    #     "n_head": args.n_head,
-    #     "input_is_covariance": args.input_is_cov,
-    #     "predict_vector": args.predict_vector
-    # })
+    wandb.init(project="transformer_pca_ood", config={
+        "learning_rate": args.lr,
+        "batch_size": args.batch_size,
+        "architecture": "gpt2",
+        "dataset": "Generated Covariance Data",
+        "training_steps": args.training_steps,
+        "D": args.D,
+        "N": args.N,
+        "top_k_eigenvalues": args.k,
+        "n_embd": args.n_embd,
+        "n_layer": args.n_layer,
+        "n_head": args.n_head,
+        "input_is_covariance": args.input_is_cov,
+        "predict_vector": args.predict_vector,
+        "ratio_use":args.ratio_use
+    })
 
 
     
@@ -194,34 +195,41 @@ if __name__ == "__main__":
         loss_sum = 0
 
         # Check if the file exists to write headers, otherwise create a new file with headers
-        if not os.path.exists(csv_file):
-            with open(csv_file, mode='w', newline='') as file:
-                writer = csv.writer(file)
-                # Write header
-                writer.writerow(['Step', 'Training Loss', 'Elapsed Time'])
+        # if not os.path.exists(csv_file):
+        with open(csv_file, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            # Write header
+            writer.writerow(['Step', 'Training Loss', 'Elapsed Time'])
 
-
-        dataset = CovarianceDataset_real_world(args.dataset, k=k,predict_vector=True)
-        # dataset_2 = CovarianceDataset("dataset/multivariate_gaussian_dataset_D_30_2560000.npz", k=k,predict_vector=True)
-        # Define DataLoader for batch processing
-        # combined_dataset = ConcatDataset([dataset, dataset_2])
+        dataset = CovarianceDataset_real_world(args.dataset, k=k,predict_vector=True, ratio_use=args.ratio_use)
         torch.manual_seed(args.seed)
-        # dataloader = DataLoader(combined_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=8)
-
-
-
-        training_steps = int(n_training_data / batch_size)
+        global_step = 0
+        
+        training_steps = int(200000 * args.ratio_use)
         print("training_steps", training_steps)
         print_every = int(1024 / batch_size)
         if not args.resume:
             start_step = 0
         # start_step = 0
-        for step, (X_train_batch, Y_train_batch, *Y_vector_batch) in enumerate(dataloader, start=start_step):
-            start_step = step
+
+        data_iter = iter(dataloader)
+        max_steps = training_steps
+        
+        for step in range(start_step, max_steps):
+            try:
+                X_train_batch, Y_train_batch, *Y_vector_batch = next(data_iter)
+            except StopIteration:
+                # Recreate iterator when exhausted (and reseed sampler if present)
+                if hasattr(dataloader.sampler, "set_epoch"):
+                    epoch += 1
+                    dataloader.sampler.set_epoch(epoch)
+                data_iter = iter(dataloader)
+                X_train_batch, Y_train_batch, *Y_vector_batch = next(data_iter)
+        
+        # for step, (X_train_batch, Y_train_batch, *Y_vector_batch) in enumerate(dataloader, start=start_step):
+        #     start_step = step
             model.train()
-            if step == 0:
-                print(f"shape of Y_train_batch: {Y_train_batch.shape}")
 
             X_train_batch = X_train_batch.to(device)
             Y_train_batch = Y_train_batch[:,:k].to(device)
@@ -280,9 +288,6 @@ if __name__ == "__main__":
                 else:
                     loss = 1 - F.cosine_similarity(output, Y_vector_batch, dim=-1).mean()
 
-
-            
-                # loss = 1 - F.cosine_similarity(output, Y_vector_batch).mean()
             else:
                 loss = criterion(output, Y_train_batch)
 
@@ -293,6 +298,7 @@ if __name__ == "__main__":
             optimizer.step()
         
             # Print and log progress every 'print_every' steps
+            global_step += 1
 
             if (step+1) % print_every == 0:
                 elapsed_time = time.time() - start_time
@@ -305,23 +311,12 @@ if __name__ == "__main__":
                 wandb.log({"training_loss": avg_loss, "step": step+1})
                 if predict_vector:
                     # pass
-                    if (step+1) % print_every*10 == 0:
+                    if (step+1) % print_every*10 == 0 and step >= 170000:
                         print(f"True top-{k} eigenvectors for 0th data in a batch:{Y_vector_batch[0,:]}")
                         print(f"Predicted top-{k} eigenvectors for 0th data in a batch:{output[0,:]}")
-                #   print(f"True top-{k} eigenvectors for 0th data in a batch:{Y_vector_batch[0,:]}")
-                #   print(f"Predicted top-{k} eigenvectors for 0th data in a batch:{output[0,:]}")
-                # elif predict_cov:
-                #   print(f"True covariance matrix for first data in first batch:{Y_train_batch[0,:]}")
-                #   print(f"Predicted covariance matrix for first data in first batch:{output[0,:]}")
-                # else:
-                #   print(f"True top-{k} eigenvalues for 0th~5th data in a batch:{Y_train_batch[:1,:k]}")
-                #   print(f"Predicted top-{k} eigenvalues for 0th~5th data in a batch:{output[:1,:k]}")
 
-                    
                 start_time = time.time() 
                 loss_sum = 0
-
-                # start_step = step + 1
 
             # Evaluate the model 
             if (step + 1) % args.eval_step == 0:
@@ -362,14 +357,6 @@ if __name__ == "__main__":
                             wandb.log({f"eigenvalue_error_{i+1}_step_{step+1}": error})
                         print(f"Epoch {step+1} Testing Errors: {testing_errors}")
         
-            # if (step + 1) % 50000 == 0:
-            #     # path = f"{args.save_model_to}_step_{step + 1}"
-            #     save_checkpoint(model, optimizer, start_step)
-
-        # avg_loss_epoch = epoch_loss_sum / len(dataloader)  # Average loss for the entire epoch
-        # print(f"Epoch [{epoch+1}/{args.epochs}], Average Epoch Loss: {avg_loss_epoch:.6f}")
-        # wandb.log({"average_epoch_loss": avg_loss_epoch, "epoch": epoch + 1})
-        # # torch.save(model.state_dict(), args.save_model_to)
         save_checkpoint(model, optimizer, start_step, args.save_model_to)
 
 
@@ -408,7 +395,7 @@ if __name__ == "__main__":
                 testing_errors.append(error.item())
                 wandb.log({f"{i+1}-eigenvalue_testing_error": error})
 
-        csv_filename = "csv/train_to_60k_divide_80_fashion_mnist_eigenvector.csv"
+        csv_filename = f"csv/train_to_60k_divide_80_fashion_mnist_eigenvector_ratio{args.ratio_use}.csv"
 
         # Check if the file exists
         if not os.path.exists(csv_filename):
